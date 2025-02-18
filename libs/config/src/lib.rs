@@ -32,7 +32,7 @@ pub fn get_config<T: DeserializeOwned + Serialize + Default>(app: App) -> Result
             .write(true)
             .create(true)
             .open(path.clone())?;
-        serde_json::to_writer(file, &T::default())?;
+        serde_json::to_writer_pretty(file, &T::default())?;
         Ok(T::default())
     } else {
         serde_json::from_reader(File::open(path)?).map_err(|e| anyhow!(e))
@@ -45,6 +45,6 @@ pub fn write_config<T: Serialize>(app: App, value: T) -> Result<()> {
         .write(true)
         .create(true)
         .open(path.clone())?;
-    serde_json::to_writer(file, &value)?;
+    serde_json::to_writer_pretty(file, &value)?;
     Ok(())
 }

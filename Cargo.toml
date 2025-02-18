@@ -2,5 +2,6 @@
 resolver = "2"
 members = [
     "libs/*",
-    "scan/src-tauri"
+    "services/*",
+    "scan/src-tauri",
 ]
