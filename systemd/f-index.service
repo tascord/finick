@@ -1,0 +1,13 @@
+[Unit]
+Description=Finick user indexing service
+After=
+Wants=
+
+[Service]
+Restart=always
+Type=simple
+ExecStart=/home/flora/Documents/projects/finick/target/release/index
+Environment='RUST_LOG=none,index=trace,ipc=trace'
+
+[Install]
+WantedBy=default.target
