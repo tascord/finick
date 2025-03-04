@@ -9,9 +9,10 @@ use std::{
 };
 
 use config::ty::App;
+use gdk::WMDecoration;
+use gtk::prelude::*;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager};
-use tauri_plugin_autostart::MacosLauncher;
 
 const CURRENT_SEARCH_ID: RwLock<String> = RwLock::new(String::new());
 
@@ -67,6 +68,12 @@ pub fn run() {
             let binding = app.webview_windows();
             let win = binding.values().next().unwrap();
 
+            let gtk = win.gtk_window().unwrap();
+            let window = gtk.window().unwrap();
+            window.set_decorations(WMDecoration::empty());
+            window.set_type_hint(gdk::WindowTypeHint::Dialog);
+            win.center().unwrap();
+
             std::thread::spawn({
                 let win = win.clone();
                 let _ = win.clone().hide();
@@ -74,13 +81,32 @@ pub fn run() {
                     ipc::start_server(App::Scan, {
                         let win = win.clone();
                         move |_: (), _: std::sync::mpsc::Sender<()>| {
+                            let gtk = win.gtk_window().unwrap();
+                            let window = gtk.window().unwrap();
+
+                            win.center().unwrap();
                             win.clone().show().unwrap();
+                            win.center().unwrap();
+
+                            window.show();
+                            window.set_decorations(WMDecoration::empty());
+                            window.set_type_hint(gdk::WindowTypeHint::Dialog);
+                            window.set_urgency_hint(true);
+                            window.raise();
+                            win.set_focus().unwrap();
                         }
                     })
                     .unwrap();
                 }
             });
             Ok(())
+        })
+        .on_window_event(|window, event| match event {
+            tauri::WindowEvent::CloseRequested { api, .. } => {
+                window.hide().unwrap();
+                api.prevent_close();
+            }
+            _ => {}
         })
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![search, open, close])

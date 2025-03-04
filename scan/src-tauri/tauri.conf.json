@@ -14,13 +14,11 @@
       {
         "title": "Scan",
         "width": 800,
-        "height": 600,
+        "height": 60,
         "alwaysOnTop": true,
         "transparent": true,
         "center": true,
-        "decorations": false,
-        "x": 0,
-        "y": 0
+        "decorations": false
       }
     ],
     "security": {

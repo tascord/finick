@@ -14,9 +14,8 @@ async fn main() {
     pool.get().unwrap().execute_batch("PRAGMA journal_mode = WAL;").unwrap();
  
     pool.get().unwrap().execute("CREATE TABLE IF NOT EXISTS files (
-        id INTEGER PRIMARY KEY,
         name TEXT NOT NULL,
-        path TEXT NOT NULL,
+        path TEXT PRIMARY KEY,
         depth INTEGER NOT NULL,
         EXECUTABLE BOOL NOT NULL,
         last_accessed INTEGER NOT NULL

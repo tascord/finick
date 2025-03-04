@@ -1,7 +1,15 @@
 [workspace]
 resolver = "2"
-members = [
-    "libs/*",
-    "services/*",
-    "scan/src-tauri", "finickctl",
-]
+members = ["libs/*", "services/*", "scan/src-tauri", "finickctl"]
+
+[profile]
+
+[profile.wasm-dev]
+inherits = "dev"
+opt-level = 1
+
+[profile.server-dev]
+inherits = "dev"
+
+[profile.android-dev]
+inherits = "dev"

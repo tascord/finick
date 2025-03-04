@@ -12,6 +12,8 @@ use std::{path::PathBuf, time::SystemTime};
 
 pub mod ty;
 const MAX_DEPTH: usize = 5;
+/// If a file was indexed less than this many seconds ago, skip re-indexing.
+const REINDEX_THRESHOLD: i64 = 60;
 
 fn folders() -> Vec<PathBuf> {
     let mut folders = vec![Path::new(&var("HOME").unwrap()).to_path_buf()];
@@ -26,7 +28,7 @@ fn folders() -> Vec<PathBuf> {
 fn ignore() -> Vec<Regex> {
     vec![
         Regex::new("node_modules/.+").unwrap(),
-        Regex::new(r"/\..+").unwrap()
+        Regex::new(r"/\..+").unwrap(),
     ]
 }
 
@@ -40,55 +42,72 @@ fn is_binary_file(path: &PathBuf) -> bool {
     }
     false
 }
+
 pub fn index(dirs: Option<Vec<PathBuf>>, pool: Pool<SqliteConnectionManager>) {
     let folders = dirs.unwrap_or(folders());
     let ignore = Arc::new(ignore());
-    let (tx, rx) = mpsc::channel::<(String, String, i64, usize, bool)>();
+    // Use a sync_channel with a fixed capacity to prevent unbounded memory usage.
+    let (tx, rx) = mpsc::sync_channel::<(String, String, i64, usize, bool)>(1000);
 
+    // Spawn a thread to process file entries.
     std::thread::spawn(move || {
         let pool = pool.clone();
-        loop {
-            while let Ok((name, path, timestamp, depth, executable)) = rx.recv() {
-                pool.get().unwrap().execute("INSERT INTO files (name, path, depth, last_accessed, executable) values (?1, ?2, ?3, ?4, ?5)", params![
-                    name, path, depth, timestamp, executable
-                ]).unwrap();
+        while let Ok((name, path, timestamp, depth, executable)) = rx.recv() {
+            let conn = pool.get().unwrap();
+            // Check if the file already exists and if it was indexed recently.
+            let should_index = match conn.query_row(
+                "SELECT last_accessed FROM files WHERE path = ?1",
+                params![&path],
+                |row| row.get::<_, i64>(0),
+            ) {
+                Ok(last_accessed) => {
+                    // Only re-index if the stored timestamp is older than our threshold.
+                    timestamp >= last_accessed + REINDEX_THRESHOLD
+                }
+                Err(_) => true, // File not indexed yet.
+            };
+
+            if should_index {
+                // Using REPLACE here so that we update if it already exists.
+                conn.execute(
+                    "REPLACE INTO files (name, path, depth, last_accessed, executable) values (?1, ?2, ?3, ?4, ?5)",
+                    params![name, path, depth, timestamp, executable],
+                )
+                .unwrap();
             }
         }
     });
 
-    folders
-        .into_iter()
-        .for_each(|f| task(f.clone(), ignore.clone(), tx.clone(), 0));
+    folders.into_iter().for_each(|f| task(f, ignore.clone(), tx.clone(), 0));
 }
 
 fn task(
     dir: PathBuf,
     ignore: Arc<Vec<Regex>>,
-    tx: mpsc::Sender<(String, String, i64, usize, bool)>,
+    tx: mpsc::SyncSender<(String, String, i64, usize, bool)>,
     depth: usize,
 ) {
     if depth > MAX_DEPTH {
         return;
     }
-
-    if let Ok(dir) = dir.read_dir() {
-        dir.filter_map(Result::ok).for_each(|file| {
-            let path = file.path();
+    if let Ok(entries) = dir.read_dir() {
+        for entry in entries.filter_map(Result::ok) {
+            let path = entry.path();
             let path_str = path.to_string_lossy().to_string();
-            let name = file.file_name().to_string_lossy().to_string();
-
-            let ft = file.file_type().unwrap();
+            let name = entry.file_name().to_string_lossy().to_string();
+            let ft = entry.file_type().unwrap();
             if ft.is_dir() && !ignore.iter().any(|pat| pat.is_match(&path_str)) {
-                task(file.path(), ignore.clone(), tx.clone(), depth + 1);
+                task(path, ignore.clone(), tx.clone(), depth + 1);
             } else if ft.is_file() && !is_binary_file(&path) {
                 let timestamp = SystemTime::now()
                     .duration_since(SystemTime::UNIX_EPOCH)
                     .unwrap()
                     .as_secs() as i64;
                 let executable = is_executable(&path);
+                // Send the file information. If the channel is full, this will block.
                 let _ = tx.send((name, path_str, timestamp, depth, executable));
             }
-        });
+        }
     }
 }
 
@@ -103,15 +122,14 @@ fn is_executable(path: &PathBuf) -> bool {
 
 pub fn search(query: &str, pool: Pool<SqliteConnectionManager>, cb: impl Fn(String, String)) {
     let query = format!("%{query}%");
-    let binding = pool.get().unwrap();
-    let mut res = binding
+    let conn = pool.get().unwrap();
+    let mut res = conn
         .prepare(
             "SELECT name, path
-            FROM files
-            WHERE name LIKE ?1 or
-            path LIKE ?1
-            ORDER BY executable DESC, last_accessed DESC, depth ASC, LENGTH(replace(name, ?1, '')) ASC
-            LIMIT 100",
+             FROM files
+             WHERE name LIKE ?1 OR path LIKE ?1
+             ORDER BY executable DESC, last_accessed DESC, depth ASC, LENGTH(replace(name, ?1, '')) ASC
+             LIMIT 100",
         )
         .unwrap();
 
@@ -119,13 +137,12 @@ pub fn search(query: &str, pool: Pool<SqliteConnectionManager>, cb: impl Fn(Stri
     while let Some(row) = rows.next().unwrap() {
         let name: String = row.get(0).unwrap();
         let path: String = row.get(1).unwrap();
-
         cb(name, path);
     }
 }
 
 pub fn watch(pool: Pool<SqliteConnectionManager>) {
-    let (tx, rx) = mpsc::channel(); // Use std::sync::mpsc::channel
+    let (tx, rx) = mpsc::channel(); // std::sync::mpsc::channel
 
     let mut watcher: RecommendedWatcher = Watcher::new(tx, Config::default()).unwrap();
 
@@ -140,16 +157,13 @@ pub fn watch(pool: Pool<SqliteConnectionManager>) {
                     index(Some(event.paths), pool.clone());
                 }
                 EventKind::Remove(_) => {
-                    event
-                        .paths
-                        .iter()
-                        .map(|p| format!("{}%", p.display()))
-                        .for_each(|param| {
-                            pool.get()
-                                .unwrap()
-                                .execute("DELETE FROM files WHERE path LIKE ?1", params![param])
-                                .unwrap();
-                        });
+                    event.paths.iter().for_each(|p| {
+                        let param = format!("{}%", p.display());
+                        pool.get()
+                            .unwrap()
+                            .execute("DELETE FROM files WHERE path LIKE ?1", params![param])
+                            .unwrap();
+                    });
                 }
                 _ => {}
             },
