@@ -106,6 +106,18 @@ fn task(
                 let executable = is_executable(&path);
                 // Send the file information. If the channel is full, this will block.
                 let _ = tx.send((name, path_str, timestamp, depth, executable));
+            } else if ft.is_symlink() {
+                if let Ok(target) = fs::read_link(&path) {
+                    if is_executable(&target) {
+                        let timestamp = SystemTime::now()
+                            .duration_since(SystemTime::UNIX_EPOCH)
+                            .unwrap()
+                            .as_secs() as i64;
+                        let executable = true;
+                        // Send the symlink information. If the channel is full, this will block.
+                        let _ = tx.send((name, path_str, timestamp, depth, executable));
+                    }
+                }
             }
         }
     }
