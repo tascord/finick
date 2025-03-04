@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref, useTemplateRef } from "vue";
+import { onMounted, onUnmounted, ref, useTemplateRef } from "vue";
 import { debounce } from "vue-debounce";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -17,20 +17,52 @@ const list = useTemplateRef('list');
 const query = debounce((val: string) => {
   selected.value = 0;
   items.value = [];
-  if (/(http(s|):\/\/|).+\.+/.test(val)) {
-    items.value.push({
-      name: val,
-      path: "Your default browser",
-      custom: 'search'
-    })
-  }
+  items.value.push({
+    name: val,
+    path: "Your default browser",
+    custom: 'search'
+  })
 
   update_size();
   invoke("search", { query: val });
 }, 400);
 
+const lev = (s: string, t: string) => {
+  if (!s.length) return t.length;
+  if (!t.length) return s.length;
+  const arr = [];
+  for (let i = 0; i <= t.length; i++) {
+    arr[i] = [i];
+    for (let j = 1; j <= s.length; j++) {
+      arr[i][j] =
+        i === 0
+          ? j
+          : Math.min(
+            arr[i - 1][j] + 1,
+            arr[i][j - 1] + 1,
+            arr[i - 1][j - 1] + (s[j - 1] === t[i - 1] ? 0 : 1)
+          );
+    }
+  }
+  return arr[t.length][s.length];
+};
+
+
 listen<[string, string]>("search-result", (event) => {
-  items.value = [...items.value, { name: event.payload[0], path: event.payload[1], custom: false, }]
+  let v = [...items.value, { name: event.payload[0], path: event.payload[1], custom: false, }]
+  v = v.sort((a, b) => (lev(input.value?.value ?? '', a.name) - lev(input.value?.value ?? '', b.name)));
+  v = v.filter(v => v.custom == false);
+  if (lev(v[0].name, input.value?.value ?? '') > 3) {
+    items.value.unshift({
+      name: input.value?.value ?? '',
+      path: "Your default browser",
+      custom: 'search'
+    })
+  }
+
+  items.value = v as any;
+
+
   update_size();
 })
 
@@ -42,9 +74,15 @@ const update_size = () => {
 
 const open = (index: number) => {
   const { name, path, custom } = items.value[index];
+  console.log({ name, path, custom });
+
   switch (custom) {
     case "search":
-      invoke("open", { path: name });
+      let url =
+        /^(https?:\/\/)?([\w-]+\.)+[\w-]+(\/[\w-./?%&=]*)?$/.test(name) ?
+          `https://${name.replace(/http(s?):\/\//, '')}` :
+          `https://duckduckgo.com/?q=${encodeURIComponent(name)}`;
+      invoke("open", { path: url });
       break;
 
     default:
@@ -64,13 +102,16 @@ const close = () => {
   console.log('closing');
   input.value!.value = '';
   items.value = [];
+  update_size();
   setTimeout(() => invoke("close"), 0);
 }
 
 onMounted(() => {
   input.value?.focus();
-  window.addEventListener('blur', () => close());
-  document.addEventListener('keydown', ev => {
+  update_size();
+
+  const handleBlur = () => close();
+  const handleKeydown = (ev: KeyboardEvent) => {
     if (ev.code == 'Escape') close();
     if (ev.code == 'ArrowUp') selected.value = selected.value == 0 ? items.value.length : selected.value - 1;
     if (ev.code == 'ArrowDown') selected.value = (selected.value + 1) % items.value.length;
@@ -79,7 +120,15 @@ onMounted(() => {
     list.value?.children[selected.value]?.scrollIntoView({
       block: 'center'
     });
-  })
+  };
+
+  window.addEventListener('blur', handleBlur);
+  document.addEventListener('keydown', handleKeydown);
+
+  onUnmounted(() => {
+    window.removeEventListener('blur', handleBlur);
+    document.removeEventListener('keydown', handleKeydown);
+  });
 });
 
 </script>
