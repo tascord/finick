@@ -43,7 +43,9 @@ fn open(path: String) {
     {
         Command::new(path)
     } else {
-        Command::new("xdg-open")
+        let mut command = Command::new("xdg-open");
+        command.arg(path);
+        command
     };
 
     command.spawn().unwrap();
