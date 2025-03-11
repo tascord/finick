@@ -78,7 +78,9 @@ pub fn index(dirs: Option<Vec<PathBuf>>, pool: Pool<SqliteConnectionManager>) {
         }
     });
 
-    folders.into_iter().for_each(|f| task(f, ignore.clone(), tx.clone(), 0));
+    folders
+        .into_iter()
+        .for_each(|f| task(f, ignore.clone(), tx.clone(), 0));
 }
 
 fn task(
@@ -133,8 +135,10 @@ fn is_executable(path: &PathBuf) -> bool {
 }
 
 pub fn search(query: &str, pool: Pool<SqliteConnectionManager>, cb: impl Fn(String, String)) {
-    let query = format!("%{query}%");
+    let like_query = format!("%{query}%");
     let conn = pool.get().unwrap();
+
+    // First, search in the database
     let mut res = conn
         .prepare(
             "SELECT name, path
@@ -145,11 +149,41 @@ pub fn search(query: &str, pool: Pool<SqliteConnectionManager>, cb: impl Fn(Stri
         )
         .unwrap();
 
-    let mut rows = res.query(params![query]).unwrap();
+    let mut found_paths = std::collections::HashSet::new();
+
+    let mut rows = res.query(params![like_query]).unwrap();
     while let Some(row) = rows.next().unwrap() {
         let name: String = row.get(0).unwrap();
         let path: String = row.get(1).unwrap();
+        found_paths.insert(path.clone());
         cb(name, path);
+    }
+
+    // Quick 1-depth search in $PATH directories
+    if let Ok(path_var) = var("PATH") {
+        for folder in env::split_paths(&path_var) {
+            if let Ok(entries) = folder.read_dir() {
+                for entry in entries.filter_map(Result::ok) {
+                    let path = entry.path();
+                    let name = entry.file_name().to_string_lossy().to_string();
+
+                    if path.is_file()
+                        && is_executable(&path)
+                        && path
+                            .file_name()
+                            .map(|v| v.to_string_lossy())
+                            .unwrap_or_default()
+                            .to_string()
+                            .contains(query)
+                    {
+                        let path_str = path.to_string_lossy().to_string();
+                        if !found_paths.contains(&path_str) {
+                            cb(name, path_str);
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
