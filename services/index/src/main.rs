@@ -1,7 +1,7 @@
 use std::{sync::mpsc::Sender, thread};
 
 use config::ty::App;
-use index::ty::{Request, Response};
+use index::ty::{Request, SearchResult};
 use r2d2::Pool;
 use r2d2_sqlite::SqliteConnectionManager;
 use rusqlite::params;
@@ -17,7 +17,9 @@ async fn main() {
         name TEXT NOT NULL,
         path TEXT PRIMARY KEY,
         depth INTEGER NOT NULL,
-        EXECUTABLE BOOL NOT NULL,
+        executable BOOL NOT NULL,
+        desktop BOOL NOT NULL,
+        icon TEXT
         last_accessed INTEGER NOT NULL
     )", params![]).unwrap();
 
@@ -25,9 +27,9 @@ async fn main() {
     thread::spawn({ let pool = pool.clone(); move || index::index(None, pool.clone())});
     ipc::start_server(App::IndexService, {
         let pool = pool.clone();
-        move |t: Request, sender: Sender<Response>| {
+        move |t: Request, sender: Sender<SearchResult>| {
             println!("Searching for {}", &t.query);
-            if t.query.len() > 2 { index::search(&t.query, pool.clone(), |name, path| { let _ = sender.send(Response { name, path }); }) };
+            if t.query.len() > 2 { index::search(&t.query, pool.clone(), |v| { let _ = sender.send(v); }) };
         }
     }).expect("Failed to start index service");
 }

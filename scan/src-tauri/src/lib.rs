@@ -25,9 +25,9 @@ fn search(app: AppHandle, query: String) {
             &index::ty::Request {
                 query: query.clone(),
             },
-            Some(move |value: index::ty::Response| {
+            Some(move |value: index::ty::SearchResult| {
                 if !CURRENT_SEARCH_ID.read().unwrap().eq(&query) {
-                    let _ = app.emit("search-result", (value.name, value.path));
+                    let _ = app.emit("search-result", value);
                 }
             }),
         )

@@ -1243,6 +1243,7 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "config",
+ "index",
  "ipc",
  "serde_json",
  "strum",

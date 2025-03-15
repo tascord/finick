@@ -6,6 +6,7 @@ edition = "2021"
 [dependencies]
 clap = { version = "4.5.30", features = ["derive"] }
 config = { path = "../libs/config" }
+index = { path = "../services/index" }
 ipc = { path = "../libs/ipc" }
 serde_json = "1.0.139"
 strum = "0.27.1"

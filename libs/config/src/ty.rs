@@ -4,5 +4,5 @@ use serde::{Deserialize, Serialize};
 pub enum App {
     Scan,
     IndexService,
-    Other(String)
+    Other(String),
 }

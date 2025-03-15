@@ -9,8 +9,16 @@ import IconApp from '../icons/application.svg';
 import IconFile from '../icons/file.svg';
 import IconSearch from '../icons/web.svg';
 
+type SearchResult = {
+  name: string,
+  path: string,
+  is_desktop: boolean,
+  icon: string | undefined,
+}
+
+
 const selected = ref(0);
-const items = ref<{ name: string, path: string, custom: 'search' | false }[]>([])
+const items = ref<(SearchResult & { custom: 'search' | false })[]>([])
 const input = useTemplateRef('input');
 const list = useTemplateRef('list');
 
@@ -20,7 +28,9 @@ const query = debounce((val: string) => {
   items.value.push({
     name: val,
     path: "Your default browser",
-    custom: 'search'
+    custom: 'search',
+    is_desktop: false,
+    icon: undefined
   })
 
   update_size();
@@ -48,15 +58,17 @@ const lev = (s: string, t: string) => {
 };
 
 
-listen<[string, string]>("search-result", (event) => {
-  let v = [...items.value, { name: event.payload[0], path: event.payload[1], custom: false, }]
+listen<SearchResult>("search-result", (event) => {
+  let v = [...items.value, { ...event.payload, custom: false, }]
   v = v.sort((a, b) => (lev(input.value?.value ?? '', a.name) - lev(input.value?.value ?? '', b.name)));
   v = v.filter(v => v.custom == false);
   if (lev(v[0].name, input.value?.value ?? '') > 3) {
     items.value.unshift({
       name: input.value?.value ?? '',
       path: "Your default browser",
-      custom: 'search'
+      custom: 'search',
+      is_desktop: false,
+      icon: undefined
     })
   }
 

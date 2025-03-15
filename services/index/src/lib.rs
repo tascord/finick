@@ -8,7 +8,19 @@ use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::sync::{mpsc, Arc};
+use std::time::Duration;
 use std::{path::PathBuf, time::SystemTime};
+use ty::SearchResult;
+
+struct ChannelData {
+    name: String,
+    path_str: String,
+    timestamp: i64,
+    depth: usize,
+    executable: bool,
+    is_desktop: bool,
+    icon: Option<String>,
+}
 
 pub mod ty;
 const MAX_DEPTH: usize = 5;
@@ -16,7 +28,11 @@ const MAX_DEPTH: usize = 5;
 const REINDEX_THRESHOLD: i64 = 60;
 
 fn folders() -> Vec<PathBuf> {
-    let mut folders = vec![Path::new(&var("HOME").unwrap()).to_path_buf()];
+    let mut folders = vec![
+        Path::new(&var("HOME").unwrap()).to_path_buf(),
+        Path::new("/usr/share/applications/").to_path_buf(),
+        Path::new("/usr/local/share/applications/").to_path_buf(),
+    ];
     if let Ok(path) = var("PATH") {
         for folder in env::split_paths(&path) {
             folders.push(folder);
@@ -47,22 +63,22 @@ pub fn index(dirs: Option<Vec<PathBuf>>, pool: Pool<SqliteConnectionManager>) {
     let folders = dirs.unwrap_or(folders());
     let ignore = Arc::new(ignore());
     // Use a sync_channel with a fixed capacity to prevent unbounded memory usage.
-    let (tx, rx) = mpsc::sync_channel::<(String, String, i64, usize, bool)>(1000);
+    let (tx, rx) = mpsc::sync_channel::<ChannelData>(1000);
 
     // Spawn a thread to process file entries.
     std::thread::spawn(move || {
         let pool = pool.clone();
-        while let Ok((name, path, timestamp, depth, executable)) = rx.recv() {
+        while let Ok(data) = rx.recv() {
             let conn = pool.get().unwrap();
             // Check if the file already exists and if it was indexed recently.
             let should_index = match conn.query_row(
                 "SELECT last_accessed FROM files WHERE path = ?1",
-                params![&path],
+                params![&data.path_str],
                 |row| row.get::<_, i64>(0),
             ) {
                 Ok(last_accessed) => {
                     // Only re-index if the stored timestamp is older than our threshold.
-                    timestamp >= last_accessed + REINDEX_THRESHOLD
+                    data.timestamp >= last_accessed + REINDEX_THRESHOLD
                 }
                 Err(_) => true, // File not indexed yet.
             };
@@ -70,23 +86,20 @@ pub fn index(dirs: Option<Vec<PathBuf>>, pool: Pool<SqliteConnectionManager>) {
             if should_index {
                 // Using REPLACE here so that we update if it already exists.
                 conn.execute(
-                    "REPLACE INTO files (name, path, depth, last_accessed, executable) values (?1, ?2, ?3, ?4, ?5)",
-                    params![name, path, depth, timestamp, executable],
+                    "REPLACE INTO files (name, path, depth, last_accessed, executable, desktop, icon) values (?1, ?2, ?3, ?4, ?5)",
+                    params![data.name, data.path_str, data.depth, data.timestamp, data.executable, data.is_desktop, data.icon],
                 )
                 .unwrap();
             }
         }
     });
 
-    folders.into_iter().for_each(|f| task(f, ignore.clone(), tx.clone(), 0));
+    folders
+        .into_iter()
+        .for_each(|f| task(f, ignore.clone(), tx.clone(), 0));
 }
 
-fn task(
-    dir: PathBuf,
-    ignore: Arc<Vec<Regex>>,
-    tx: mpsc::SyncSender<(String, String, i64, usize, bool)>,
-    depth: usize,
-) {
+fn task(dir: PathBuf, ignore: Arc<Vec<Regex>>, tx: mpsc::SyncSender<ChannelData>, depth: usize) {
     if depth > MAX_DEPTH {
         return;
     }
@@ -94,7 +107,10 @@ fn task(
         for entry in entries.filter_map(Result::ok) {
             let path = entry.path();
             let path_str = path.to_string_lossy().to_string();
-            let name = entry.file_name().to_string_lossy().to_string();
+            let mut name = entry.file_name().to_string_lossy().to_string();
+            let mut icon = Option::<String>::None;
+            let mut is_desktop = false;
+
             let ft = entry.file_type().unwrap();
             if ft.is_dir() && !ignore.iter().any(|pat| pat.is_match(&path_str)) {
                 task(path, ignore.clone(), tx.clone(), depth + 1);
@@ -104,8 +120,28 @@ fn task(
                     .unwrap()
                     .as_secs() as i64;
                 let executable = is_executable(&path);
-                // Send the file information. If the channel is full, this will block.
-                let _ = tx.send((name, path_str, timestamp, depth, executable));
+
+                if path
+                    .extension()
+                    .map(|v| v.to_string_lossy().to_string())
+                    .unwrap_or_default()
+                    == "desktop".to_string()
+                {
+                    let (new_name, new_icon) = read_desktop(&path).unwrap_or_default();
+                    name = if new_name.is_empty() { name } else { name };
+                    icon = new_icon;
+                    is_desktop = true;
+                }
+
+                let _ = tx.send(ChannelData {
+                    name,
+                    path_str,
+                    timestamp,
+                    depth,
+                    executable,
+                    is_desktop,
+                    icon,
+                });
             } else if ft.is_symlink() {
                 if let Ok(target) = fs::read_link(&path) {
                     if is_executable(&target) {
@@ -115,10 +151,20 @@ fn task(
                             .as_secs() as i64;
                         let executable = true;
                         // Send the symlink information. If the channel is full, this will block.
-                        let _ = tx.send((name, path_str, timestamp, depth, executable));
+                        let _ = tx.send(ChannelData {
+                            name,
+                            path_str,
+                            timestamp,
+                            depth,
+                            executable,
+                            is_desktop,
+                            icon,
+                        });
                     }
                 }
             }
+
+            std::thread::sleep(Duration::from_millis(100));
         }
     }
 }
@@ -132,12 +178,27 @@ fn is_executable(path: &PathBuf) -> bool {
     }
 }
 
-pub fn search(query: &str, pool: Pool<SqliteConnectionManager>, cb: impl Fn(String, String)) {
+fn read_desktop(path: &PathBuf) -> Result<(String, Option<String>), ()> {
+    let desktop = fs::read_to_string(&path).map_err(|_| ())?;
+
+    let name = desktop
+        .lines()
+        .find(|l| l.starts_with("Name="))
+        .map(|n| n.split('=').last().unwrap_or_default().to_string())
+        .ok_or(())?;
+
+    let icon = desktop.lines().find(|l| l.starts_with("Icon="));
+    let icon = icon.map(|i| i.split('=').last().unwrap_or_default().to_string());
+
+    Ok((name, icon))
+}
+
+pub fn search(query: &str, pool: Pool<SqliteConnectionManager>, cb: impl Fn(SearchResult)) {
     let query = format!("%{query}%");
     let conn = pool.get().unwrap();
     let mut res = conn
         .prepare(
-            "SELECT name, path
+            "SELECT name, path, icon, desktop, executable
              FROM files
              WHERE name LIKE ?1 OR path LIKE ?1
              ORDER BY executable DESC, last_accessed DESC, depth ASC, LENGTH(replace(name, ?1, '')) ASC
@@ -149,7 +210,17 @@ pub fn search(query: &str, pool: Pool<SqliteConnectionManager>, cb: impl Fn(Stri
     while let Some(row) = rows.next().unwrap() {
         let name: String = row.get(0).unwrap();
         let path: String = row.get(1).unwrap();
-        cb(name, path);
+        let icon: Option<String> = row.get(2).unwrap();
+        let desktop: bool = row.get(3).unwrap();
+        let executable: bool = row.get(4).unwrap();
+
+        cb(SearchResult {
+            name,
+            path,
+            icon,
+            is_desktop: desktop,
+            is_executable: executable,
+        });
     }
 }
 

@@ -12,6 +12,7 @@ struct Args {
 #[derive(strum::Display, strum::EnumString, Clone, Debug)]
 enum Program {
     scan,
+    index(String),
 }
 
 fn main() {
@@ -24,6 +25,31 @@ fn main() {
                     eprintln!("Failed to connect to service. ({e:?})");
                 }
             };
+        }
+        Program::index(q) => {
+            ipc::send_command(
+                App::IndexService,
+                &index::ty::Request { query: q },
+                Some(move |value: index::ty::SearchResult| {
+                    println!(
+                        "{ic}{}\t{}",
+                        value.name,
+                        value.path,
+                        ic = {
+                            if value.is_desktop {
+                                "@"
+                            } else if value.is_executable {
+                                "*"
+                            } else {
+                                ""
+                            }
+                        }
+                    );
+                }),
+            )
+            .expect("Failed to connect to index");
+
+            println!("Done")
         }
     }
 }
