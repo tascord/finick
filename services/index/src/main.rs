@@ -19,7 +19,7 @@ async fn main() {
         depth INTEGER NOT NULL,
         executable BOOL NOT NULL,
         desktop BOOL NOT NULL,
-        icon TEXT
+        icon TEXT,
         last_accessed INTEGER NOT NULL
     )", params![]).unwrap();
 

@@ -86,7 +86,7 @@ pub fn index(dirs: Option<Vec<PathBuf>>, pool: Pool<SqliteConnectionManager>) {
             if should_index {
                 // Using REPLACE here so that we update if it already exists.
                 conn.execute(
-                    "REPLACE INTO files (name, path, depth, last_accessed, executable, desktop, icon) values (?1, ?2, ?3, ?4, ?5)",
+                    "REPLACE INTO files (name, path, depth, last_accessed, executable, desktop, icon) values (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
                     params![data.name, data.path_str, data.depth, data.timestamp, data.executable, data.is_desktop, data.icon],
                 )
                 .unwrap();
