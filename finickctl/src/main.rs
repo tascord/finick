@@ -6,13 +6,15 @@ use config::ty::App;
 struct Args {
     #[arg(short, help = "Program to command")]
     program: Program,
+    #[arg(name = "DATA", help = "Data to parse")]
+    data: Option<String>,
 }
 
 #[allow(non_camel_case_types)]
 #[derive(strum::Display, strum::EnumString, Clone, Debug)]
 enum Program {
     scan,
-    index(String),
+    index,
 }
 
 fn main() {
@@ -26,7 +28,13 @@ fn main() {
                 }
             };
         }
-        Program::index(q) => {
+        Program::index => {
+            let q = args.data.unwrap_or_else(|| {
+                eprintln!("No data provided");
+                std::process::exit(1);
+            });
+
+            println!("Searching for: {}", q);
             ipc::send_command(
                 App::IndexService,
                 &index::ty::Request { query: q },

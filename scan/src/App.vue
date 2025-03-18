@@ -59,6 +59,8 @@ const lev = (s: string, t: string) => {
 
 
 listen<SearchResult>("search-result", (event) => {
+  console.log(event.payload);
+
   let v = [...items.value, { ...event.payload, custom: false, }]
   v = v.sort((a, b) => (lev(input.value?.value ?? '', a.name) - lev(input.value?.value ?? '', b.name)));
   v = v.filter(v => v.custom == false);
