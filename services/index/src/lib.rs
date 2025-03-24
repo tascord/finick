@@ -1,10 +1,11 @@
+use image::ImageReader;
 use notify::{Config, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use r2d2::Pool;
 use r2d2_sqlite::SqliteConnectionManager;
 use regex::Regex;
 use rusqlite::params;
 use std::env::{self, var};
-use std::fs;
+use std::fs::{self, read_dir};
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::sync::{mpsc, Arc};
@@ -128,7 +129,7 @@ fn task(dir: PathBuf, ignore: Arc<Vec<Regex>>, tx: mpsc::SyncSender<ChannelData>
                     == "desktop".to_string()
                 {
                     let (new_name, new_icon) = read_desktop(&path).unwrap_or_default();
-                    name = if new_name.is_empty() { name } else { name };
+                    name = if new_name.is_empty() { name } else { new_name };
                     icon = new_icon;
                     is_desktop = true;
                 }
@@ -184,13 +185,50 @@ fn read_desktop(path: &PathBuf) -> Result<(String, Option<String>), ()> {
     let name = desktop
         .lines()
         .find(|l| l.starts_with("Name="))
-        .map(|n| n.split('=').last().unwrap_or_default().to_string())
+        .map(|n| n.split('=').skip(1).collect::<Vec<_>>().join("="))
         .ok_or(())?;
 
     let icon = desktop.lines().find(|l| l.starts_with("Icon="));
     let icon = icon.map(|i| i.split('=').last().unwrap_or_default().to_string());
 
-    Ok((name, icon))
+    if let Some(icon) = icon.and_then(|icon| resolve_icon(&icon)) {
+        let img = ImageReader::open(path).unwrap().decode().unwrap();
+        let img = img.resize(64, 64, image::imageops::FilterType::Lanczos3);
+
+        let path = config::finick_root()
+            .join("icons")
+            .join(format!("{icon}.png"));
+
+        img.save(&path).unwrap();
+        return Ok((name, Some(path.to_string_lossy().to_string())));
+    }
+
+    Ok((name, None))
+}
+
+fn resolve_icon(name: &str) -> Option<String> {
+    let locations = vec![
+        env::var("HOME").map(|v| format!("{v}/.icons/")).ok(),
+        env::var("XDG_DATA_HOME")
+            .map(|v| format!("{v}/icons/"))
+            .ok(),
+        Some("/usr/share/pixmaps".to_string()),
+    ]
+    .into_iter()
+    .filter_map(|v| v);
+
+    for location in locations {
+        if let Ok(dir) = read_dir(location) {
+            if let Some(icon) = dir
+                .filter_map(|f| f.ok())
+                .find(|f| f.file_name().to_string_lossy().starts_with(name))
+            {
+                return Some(icon.path().to_string_lossy().to_string());
+            }
+        }
+    }
+
+    None
 }
 
 pub fn search(query: &str, pool: Pool<SqliteConnectionManager>, cb: impl Fn(SearchResult)) {

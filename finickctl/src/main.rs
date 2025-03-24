@@ -6,6 +6,8 @@ use config::ty::App;
 struct Args {
     #[arg(short, help = "Program to command")]
     program: Program,
+    #[arg(short, help = "Output in JSON format", default_value = "false")]
+    json: bool,
     #[arg(name = "DATA", help = "Data to parse")]
     data: Option<String>,
 }
@@ -38,21 +40,24 @@ fn main() {
             ipc::send_command(
                 App::IndexService,
                 &index::ty::Request { query: q },
-                Some(move |value: index::ty::SearchResult| {
-                    println!(
-                        "{ic}{}\t{}",
-                        value.name,
-                        value.path,
-                        ic = {
-                            if value.is_desktop {
-                                "@"
-                            } else if value.is_executable {
-                                "*"
-                            } else {
-                                ""
+                Some(move |value: index::ty::SearchResult| match args.json {
+                    true => println!("{}", serde_json::to_string(&value).unwrap()),
+                    false => {
+                        println!(
+                            "{ic}{}\t{}",
+                            value.name,
+                            value.path,
+                            ic = {
+                                if value.is_desktop {
+                                    "@"
+                                } else if value.is_executable {
+                                    "*"
+                                } else {
+                                    ""
+                                }
                             }
-                        }
-                    );
+                        );
+                    }
                 }),
             )
             .expect("Failed to connect to index");
