@@ -1,4 +1,5 @@
 use image::ImageReader;
+use ipc::log::trace;
 use notify::{Config, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use r2d2::Pool;
 use r2d2_sqlite::SqliteConnectionManager;
@@ -30,9 +31,9 @@ const REINDEX_THRESHOLD: i64 = 60;
 
 fn folders() -> Vec<PathBuf> {
     let mut folders = vec![
-        Path::new(&var("HOME").unwrap()).to_path_buf(),
         Path::new("/usr/share/applications/").to_path_buf(),
         Path::new("/usr/local/share/applications/").to_path_buf(),
+        Path::new(&var("HOME").unwrap()).to_path_buf(),
     ];
     if let Ok(path) = var("PATH") {
         for folder in env::split_paths(&path) {
@@ -45,6 +46,7 @@ fn folders() -> Vec<PathBuf> {
 fn ignore() -> Vec<Regex> {
     vec![
         Regex::new("node_modules/.+").unwrap(),
+        Regex::new("target/.+").unwrap(),
         Regex::new(r"/\..+").unwrap(),
     ]
 }
@@ -54,7 +56,7 @@ fn is_binary_file(path: &PathBuf) -> bool {
         let ext = ext.to_string_lossy().to_lowercase();
         return matches!(
             ext.as_str(),
-            "exe" | "bin" | "o" | "dll" | "so" | "dat" | "class"
+            "exe" | "bin" | "o" | "dll" | "so" | "dat" | "class" | "rmeta" | "rlib" | "d"
         );
     }
     false
@@ -71,6 +73,7 @@ pub fn index(dirs: Option<Vec<PathBuf>>, pool: Pool<SqliteConnectionManager>) {
         let pool = pool.clone();
         while let Ok(data) = rx.recv() {
             let conn = pool.get().unwrap();
+            println!("{:?}", &data.icon);
             // Check if the file already exists and if it was indexed recently.
             let should_index = match conn.query_row(
                 "SELECT last_accessed FROM files WHERE path = ?1",
@@ -95,15 +98,21 @@ pub fn index(dirs: Option<Vec<PathBuf>>, pool: Pool<SqliteConnectionManager>) {
         }
     });
 
-    folders
-        .into_iter()
-        .for_each(|f| task(f, ignore.clone(), tx.clone(), 0));
+    folders.into_iter().for_each(|f| {
+        std::thread::spawn({
+            let ignore = ignore.clone();
+            let tx = tx.clone();
+            move || task(f, ignore.clone(), tx.clone(), 0)
+        });
+    });
 }
 
 fn task(dir: PathBuf, ignore: Arc<Vec<Regex>>, tx: mpsc::SyncSender<ChannelData>, depth: usize) {
     if depth > MAX_DEPTH {
         return;
     }
+
+    trace!("Indexing {}", dir.display());
     if let Ok(entries) = dir.read_dir() {
         for entry in entries.filter_map(Result::ok) {
             let path = entry.path();
@@ -192,15 +201,17 @@ fn read_desktop(path: &PathBuf) -> Result<(String, Option<String>), ()> {
     let icon = icon.map(|i| i.split('=').last().unwrap_or_default().to_string());
 
     if let Some(icon) = icon.and_then(|icon| resolve_icon(&icon)) {
-        let img = ImageReader::open(path).unwrap().decode().unwrap();
-        let img = img.resize(64, 64, image::imageops::FilterType::Lanczos3);
+        if let Ok(img) = ImageReader::open(Path::new(&icon)).unwrap().decode() {
+            let img = img.resize(64, 64, image::imageops::FilterType::Lanczos3);
 
-        let path = config::finick_root()
-            .join("icons")
-            .join(format!("{icon}.png"));
+            let path = config::finick_root()
+                .join("icons")
+                .join(format!("{name}.png"));
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
 
-        img.save(&path).unwrap();
-        return Ok((name, Some(path.to_string_lossy().to_string())));
+            img.save(&path).map_err(|_| ())?;
+            return Ok((name, Some(path.to_string_lossy().to_string())));
+        }
     }
 
     Ok((name, None))
