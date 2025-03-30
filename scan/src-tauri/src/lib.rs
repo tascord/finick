@@ -53,13 +53,13 @@ fn open(path: String) {
 
 #[tauri::command]
 fn close(app: AppHandle) {
-    // app.webview_windows()
-    //     .values()
-    //     .next()
-    //     .unwrap()
-    //     .clone()
-    //     .hide()
-    //     .unwrap();
+    app.webview_windows()
+        .values()
+        .next()
+        .unwrap()
+        .clone()
+        .hide()
+        .unwrap();
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -78,7 +78,7 @@ pub fn run() {
 
             std::thread::spawn({
                 let win = win.clone();
-                // let _ = win.clone().hide();
+                let _ = win.clone().hide();
                 move || {
                     ipc::start_server(App::Scan, {
                         let win = win.clone();

@@ -162,8 +162,10 @@ onMounted(() => {
         <li v-for="(item, index) in items" :key="index" :tabindex="index + 1"
           @keydown="key => key.code === 'Enter' ? open(index) : nav(key)" @click="() => open(index)"
           :class="`w-full hover:bg-gray-100 px-2 py-2 rounded-lg border border-gray-200 cursor-pointer flex space-x-4 ${selected == index ? 'bg-gray-100' : ''}`">
-          <img
-            :src="item.icon ? convertFileSrc(item.icon) : (item.custom == 'search' ? IconSearch : /\..+$/.test(item.path) ? IconFile : IconApp)">
+          <div class="h-full grid place-items-center">
+            <img class="w-8 h-8"
+              :src="item.icon ? convertFileSrc(item.icon) : (item.custom == 'search' ? IconSearch : /\..+$/.test(item.path) ? IconFile : IconApp)">
+          </div>
           <div class="overflow-clip">
             <h2 class="font-semibold -mb-2 truncate max-w-full">{{ item.name }}</h2>
             <span class="text-xs truncate max-w-full">{{ item.path }}</span>

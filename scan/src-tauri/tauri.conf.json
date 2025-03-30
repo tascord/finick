@@ -24,9 +24,9 @@
     "security": {
       "assetProtocol": {
         "enable": true,
-        "scope": [
-          "$HOME/.config/.finish/icons/*.png"
-        ]
+        "scope": {
+          "allow": ["$HOME/.config/.finick/**/*.png"]
+        }
       },
       "csp": "default-src 'self' ipc: http://ipc.localhost; img-src 'self' asset: http://asset.localhost"
     }
