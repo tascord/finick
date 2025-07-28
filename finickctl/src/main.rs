@@ -23,7 +23,7 @@ fn main() {
     let args = Args::parse();
     match args.program {
         Program::scan => {
-            match ipc::send_command(App::Scan, &(), Some(|_: ()| {})) {
+            match ipsea::send_command(App::Scan, &(), Some(|_: ()| {})) {
                 Ok(_) => {}
                 Err(e) => {
                     eprintln!("Failed to connect to service. ({e:?})");
@@ -37,7 +37,7 @@ fn main() {
             });
 
             println!("Searching for: {}", q);
-            ipc::send_command(
+            ipsea::send_command(
                 App::IndexService,
                 &index::ty::Request { query: q },
                 Some(move |value: index::ty::SearchResult| match args.json {

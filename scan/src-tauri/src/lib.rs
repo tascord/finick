@@ -20,7 +20,7 @@ const CURRENT_SEARCH_ID: RwLock<String> = RwLock::new(String::new());
 fn search(app: AppHandle, query: String) {
     *CURRENT_SEARCH_ID.write().unwrap() = query.clone();
     std::thread::spawn(|| {
-        ipc::send_command(
+        ipsea::send_command(
             App::IndexService,
             &index::ty::Request {
                 query: query.clone(),
@@ -80,7 +80,7 @@ pub fn run() {
                 let win = win.clone();
                 let _ = win.clone().hide();
                 move || {
-                    ipc::start_server(App::Scan, {
+                    ipsea::start_server(App::Scan, {
                         let win = win.clone();
                         move |_: (), _: std::sync::mpsc::Sender<()>| {
                             let gtk = win.gtk_window().unwrap();

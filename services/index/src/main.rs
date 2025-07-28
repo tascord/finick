@@ -25,7 +25,7 @@ async fn main() {
 
     thread::spawn({ let pool = pool.clone(); move || index::watch(pool.clone())});
     thread::spawn({ let pool = pool.clone(); move || index::index(None, pool.clone())});
-    ipc::start_server(App::IndexService, {
+    ipsea::start_server(App::IndexService, {
         let pool = pool.clone();
         move |t: Request, sender: Sender<SearchResult>| {
             println!("Searching for {}", &t.query);
