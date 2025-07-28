@@ -2,6 +2,9 @@
 name = "ipsea"
 version = "1.0.0"
 edition = "2021"
+description = "easy little ipc library"
+repository = "https://github.com/tascord/finick/"
+license = "MIT"
 
 [dependencies]
 serde = { version = "1.0.217", features = ["derive"] }
