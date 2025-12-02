@@ -99,11 +99,11 @@ where
     let socket_path = PathBuf::from(format!("/tmp/{}.sock", socket_name.to_string()));
     let _ = std::fs::remove_file(&socket_path);
     let listener = UnixListener::bind(&socket_path)?;
-        let mut perms = std::fs::metadata(&socket_path)?.permissions();
-        perms.set_mode(0o777);
-        if let Err(e) = std::fs::set_permissions(&socket_path, perms) {
-            warn!("Unable to upen up permissions for socket: {e:?}")
-        };
+    let mut perms = std::fs::metadata(&socket_path)?.permissions();
+    perms.set_mode(0o777);
+    if let Err(e) = std::fs::set_permissions(&socket_path, perms) {
+        warn!("Unable to upen up permissions for socket: {e:?}")
+    };
 
     info!("Server started on {:?}", socket_path);
 
