@@ -1,8 +1,9 @@
 use bincode;
-use log::{error, info, trace};
+use log::{error, info, trace, warn};
 use serde::{Deserialize, Serialize};
 use std::io::{BufReader, Read, Write};
 use std::marker::PhantomData;
+use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Sender};
@@ -98,6 +99,12 @@ where
     let socket_path = PathBuf::from(format!("/tmp/{}.sock", socket_name.to_string()));
     let _ = std::fs::remove_file(&socket_path);
     let listener = UnixListener::bind(&socket_path)?;
+        let mut perms = std::fs::metadata(&socket_path)?.permissions();
+        perms.set_mode(0o777);
+        if let Err(e) = std::fs::set_permissions(&socket_path, perms) {
+            warn!("Unable to upen up permissions for socket: {e:?}")
+        };
+
     info!("Server started on {:?}", socket_path);
 
     for stream in listener.incoming() {

@@ -1,1 +1,17 @@
-/target
+# Build outputs
+/target/
+/scan/dist/
+/scan/node_modules/
+
+# Nix
+result
+result-*
+.direnv/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
