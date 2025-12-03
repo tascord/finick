@@ -16,7 +16,7 @@ pub enum StreamResponse<T> {
     EndOfStream,
 }
 
-pub(crate) fn handle<Res, Req>(stream: &mut UnixStream) -> Option<(Req, Sender<Res>)>
+pub(crate) fn handle<Res, Req>(mut stream: UnixStream) -> Option<(Req, Sender<Res>)>
 where
     Req: for<'de> Deserialize<'de> + Send + 'static + std::fmt::Debug,
     Res: Serialize + Send + 'static + std::fmt::Debug,
@@ -38,7 +38,7 @@ where
         info!("Received request: {:?}", req);
         let (tx, rx) = mpsc::channel();
 
-        std::thread::scope(|_| {
+        std::thread::spawn(move || {
             for response in rx {
                 trace!("Sending response: {:?}", response);
                 match bincode::serialize(&StreamResponse::Data(response)) {
@@ -99,19 +99,22 @@ where
     let socket_path = PathBuf::from(format!("/tmp/{}.sock", socket_name.to_string()));
     let _ = std::fs::remove_file(&socket_path);
     let listener = UnixListener::bind(&socket_path)?;
-    let mut perms = std::fs::metadata(&socket_path)?.permissions();
-    perms.set_mode(0o777);
-    if let Err(e) = std::fs::set_permissions(&socket_path, perms) {
-        warn!("Unable to upen up permissions for socket: {e:?}")
-    };
+
+    // if let Ok(metadata) = std::fs::metadata(&socket_path) {
+    //     let mut perms = metadata.permissions();
+    //     perms.set_mode(0o777);
+    //     if let Err(e) = std::fs::set_permissions(&socket_path, perms) {
+    //         warn!("Unable to upen up permissions for socket: {e:?}")
+    //     };
+    // }
 
     info!("Server started on {:?}", socket_path);
 
     for stream in listener.incoming() {
         match stream {
-            Ok(mut stream) => {
+            Ok(stream) => {
                 info!("Accepted connection");
-                let (req, tx) = handle(&mut stream).ok_or(std::io::Error::new(
+                let (req, tx) = handle(stream).ok_or(std::io::Error::new(
                     std::io::ErrorKind::InvalidData,
                     "Handshake error",
                 ))?;
@@ -168,7 +171,7 @@ where
                     .map(|(stream, _)| {
                         Some(
                             match handle(
-                                &mut stream
+                                stream
                                     .into_std()
                                     .expect("Failed to construct stdio UnixStream"),
                             ) {
