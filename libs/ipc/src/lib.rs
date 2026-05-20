@@ -1,14 +1,43 @@
+#[cfg(feature = "bincode")]
 use bincode;
-use log::{error, info, trace, warn};
+
+#[cfg(not(feature = "bincode"))]
+use serde_json;
+
+use log::{error, info, trace};
 use serde::{Deserialize, Serialize};
 use std::io::{BufReader, Read, Write};
 use std::marker::PhantomData;
-use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Sender};
 
 pub use log;
+
+fn serialize_to_vec<T: Serialize>(value: &T) -> Result<Vec<u8>, String> {
+    #[cfg(feature = "bincode")]
+    {
+        bincode::serialize(value).map_err(|e| e.to_string())
+    }
+    #[cfg(not(feature = "bincode"))]
+    {
+        serde_json::to_vec(value).map_err(|e| e.to_string())
+    }
+}
+
+fn deserialize_from_slice<'de, T>(bytes: &'de [u8]) -> Result<T, String>
+where
+    T: Deserialize<'de>,
+{
+    #[cfg(feature = "bincode")]
+    {
+        bincode::deserialize(bytes).map_err(|e| e.to_string())
+    }
+    #[cfg(not(feature = "bincode"))]
+    {
+        serde_json::from_slice(bytes).map_err(|e| e.to_string())
+    }
+}
 
 #[derive(Serialize, Deserialize, Debug)]
 pub enum StreamResponse<T> {
@@ -34,14 +63,14 @@ where
         return None;
     }
 
-    if let Ok(req) = bincode::deserialize::<Req>(&buf) {
+    if let Ok(req) = deserialize_from_slice::<Req>(&buf) {
         info!("Received request: {:?}", req);
         let (tx, rx) = mpsc::channel();
 
         std::thread::spawn(move || {
             for response in rx {
                 trace!("Sending response: {:?}", response);
-                match bincode::serialize(&StreamResponse::Data(response)) {
+                match serialize_to_vec(&StreamResponse::Data(response)) {
                     Ok(resp_buf) => {
                         let len_bytes = (resp_buf.len() as u32).to_le_bytes();
                         if stream.write_all(&len_bytes).is_err() {
@@ -65,7 +94,7 @@ where
             }
 
             // Send EndOfStream message
-            match bincode::serialize(&StreamResponse::<Res>::EndOfStream) {
+            match serialize_to_vec(&StreamResponse::<Res>::EndOfStream) {
                 Ok(end_buf) => {
                     let len_bytes = (end_buf.len() as u32).to_le_bytes();
                     if stream.write_all(&len_bytes).is_err() {
@@ -99,14 +128,6 @@ where
     let socket_path = PathBuf::from(format!("/tmp/{}.sock", socket_name.to_string()));
     let _ = std::fs::remove_file(&socket_path);
     let listener = UnixListener::bind(&socket_path)?;
-
-    // if let Ok(metadata) = std::fs::metadata(&socket_path) {
-    //     let mut perms = metadata.permissions();
-    //     perms.set_mode(0o777);
-    //     if let Err(e) = std::fs::set_permissions(&socket_path, perms) {
-    //         warn!("Unable to upen up permissions for socket: {e:?}")
-    //     };
-    // }
 
     info!("Server started on {:?}", socket_path);
 
@@ -218,7 +239,7 @@ where
     let mut stream = UnixStream::connect(&socket_path)?;
 
     // Send request with length prefix
-    let data = bincode::serialize(command).expect("Serialization failed");
+    let data = serialize_to_vec(command).expect("Serialization failed");
     let len_bytes = (data.len() as u32).to_le_bytes();
     stream.write_all(&len_bytes)?;
     stream.write_all(&data)?;
@@ -244,7 +265,7 @@ where
         }
 
         // Deserialize response
-        match bincode::deserialize::<StreamResponse<Res>>(&buf) {
+        match deserialize_from_slice::<StreamResponse<Res>>(&buf) {
             Ok(StreamResponse::Data(response)) => {
                 info!("Received response: {:?}", response);
                 if let Some(ref handler) = handler {

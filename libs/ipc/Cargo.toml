@@ -1,17 +1,22 @@
 [package]
 name = "ipsea"
-version = "1.1.2"
+version = "1.2.0"
 edition = "2021"
 description = "easy little ipc library"
 repository = "https://github.com/tascord/finick/"
 license = "MIT"
 
 [dependencies]
-serde = { version = "1.0.217", features = ["derive"] }
-bincode = "1.3.3"
-log = "0.4.25"
-futures = "0.3.31"
-tokio = { version = "1.47.0", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", optional = true }
+bincode = { version = "1", optional = true }
+log = "0.4"
+futures = "0.3"
+tokio = { version = "1", features = ["full"] }
 pretty_env_logger = "0.5.0"
+
+[features]
+default = ["dep:serde_json"]
+bincode = ["dep:bincode"]
 
 [dev-dependencies]
