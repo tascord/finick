@@ -1,0 +1,14 @@
+[package]
+name = "files"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+ipsea = { path = "../../libs/ipc" }
+config = { path = "../../libs/config" }
+index = { path = "../../services/index" }
+
+serde_json = "1.0.139"
+freya = { git = "https://github.com/marc2332/freya", branch = "main", features = [
+    "all",
+] }

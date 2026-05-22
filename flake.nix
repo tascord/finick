@@ -1,8 +1,8 @@
 {
-  description = "Finick - A Rust/Tauri application with Vue frontend";
+  description = "Finick - A Rust/Dioxus/Freya application";
 
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    nixpkgs.follows = "devenv/nixpkgs";
     flake-utils.url = "github:numtide/flake-utils";
     rust-overlay.url = "github:oxalica/rust-overlay";
     devenv.url = "github:cachix/devenv";
@@ -18,43 +18,31 @@
 
         # Rust toolchain
         rustToolchain = pkgs.rust-bin.stable.latest.default.override {
-          extensions = [ "rust-src" "rust-analyzer" ];
-          targets = [ "wasm32-unknown-unknown" ];
+          extensions = [ "rust-src" "rust-analyzer" "clippy" ];
         };
 
-        # System dependencies for Tauri
+        # System dependencies for Dioxus/Freya
         systemDeps = with pkgs; [
-          # Tauri dependencies
           pkg-config
           openssl
           webkitgtk_4_1
           gtk3
-          cairo
-          gdk-pixbuf
           glib
-          dbus
-          librsvg
-          
-          # Additional GTK/GDK dependencies
-          atk
-          pango
-          
-          # Build tools
-          cmake
-          
-          # For WebKit
-          libsoup_3
-          
-          # Database
-          sqlite
+          xdotool # For libxdo (lxdo crate)
+          stdenv.cc
+          binutils
+          # Dioxus/Freya dependencies
+          libxkbcommon
+          libGL
+          wayland
         ];
 
         # Development tools
         devTools = with pkgs; [
           rustToolchain
-          nodejs_20
-          yarn
-          # Tauri CLI will be installed via cargo
+          dprint
+          lld
+          mold
           
           # Additional development tools
           git
@@ -65,7 +53,6 @@
           rust-analyzer
           cargo-watch
           cargo-edit
-          cargo-audit
         ];
 
         # Runtime libraries
@@ -90,38 +77,19 @@
               pkgs.openssl.dev
               pkgs.webkitgtk_4_1.dev
               pkgs.gtk3.dev
-              pkgs.cairo.dev
-              pkgs.gdk-pixbuf.dev
               pkgs.glib.dev
-              pkgs.dbus.dev
-              pkgs.atk.dev
-              pkgs.pango.dev
-              pkgs.librsvg.dev
-              pkgs.libsoup_3.dev
-              pkgs.sqlite.dev
             ]}"
             export LD_LIBRARY_PATH="${pkgs.lib.makeLibraryPath (systemDeps ++ runtimeLibs)}"
-            export WEBKIT_DISABLE_DMABUF_RENDERER=1
             export NODE_ENV=development
 
             echo "🦀 Welcome to Finick development environment!"
             echo ""
             echo "Available commands:"
             echo "  cargo build              - Build Rust workspace"
-            echo "  cargo tauri dev          - Start Tauri development server"
-            echo "  cd scan && yarn install  - Install frontend dependencies"
-            echo "  cd scan && yarn dev      - Start Vue development server"
+            echo "  cargo run                - Run the application"
             echo ""
             echo "Rust toolchain: $(rustc --version)"
-            echo "Node.js: $(node --version)"
-            echo "Yarn: $(yarn --version)"
             echo ""
-            
-            # Install Tauri CLI if not present
-            if ! command -v cargo-tauri &> /dev/null; then
-              echo "Installing Tauri CLI..."
-              cargo install tauri-cli
-            fi
           '';
         };
 
@@ -154,7 +122,7 @@
           doCheck = false;
           
           meta = with pkgs.lib; {
-            description = "Finick - A Rust/Tauri application";
+            description = "Finick - A Rust/Dioxus application";
             license = licenses.mit; # Adjust as needed
             maintainers = [ ];
           };

@@ -188,10 +188,7 @@ where
     ) -> std::task::Poll<Option<Self::Item>> {
         match self.unix_stream.poll_accept(cx) {
             std::task::Poll::Ready(v) => std::task::Poll::Ready(
-                v.ok()
-                    .map(|(stream, _)| {
-                        Some(
-                            match handle(
+                v.ok().map(|(stream, _)| match handle(
                                 stream
                                     .into_std()
                                     .expect("Failed to construct stdio UnixStream"),
@@ -201,10 +198,7 @@ where
                                     std::io::ErrorKind::InvalidData,
                                     "Handshake error",
                                 )),
-                            },
-                        )
-                    })
-                    .flatten(),
+                            }),
             ),
             std::task::Poll::Pending => std::task::Poll::Pending,
         }
@@ -251,7 +245,7 @@ where
     loop {
         // Read the length of the incoming response
         let mut len_buf = [0u8; 4];
-        if let Err(_) = reader.read_exact(&mut len_buf) {
+        if reader.read_exact(&mut len_buf).is_err() {
             error!("Failed to read response length");
             break;
         }
@@ -259,7 +253,7 @@ where
 
         // Read the full response
         let mut buf = vec![0u8; response_len];
-        if let Err(_) = reader.read_exact(&mut buf) {
+        if reader.read_exact(&mut buf).is_err() {
             error!("Failed to read response data");
             break;
         }
