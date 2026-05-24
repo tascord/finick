@@ -45,7 +45,7 @@ pub enum StreamResponse<T> {
     EndOfStream,
 }
 
-pub(crate) fn handle<Res, Req>(mut stream: UnixStream) -> Option<(Req, Sender<Res>)>
+pub(crate) fn process<Res, Req>(mut stream: UnixStream) -> Option<(Req, Sender<Res>)>
 where
     Req: for<'de> Deserialize<'de> + Send + 'static + std::fmt::Debug,
     Res: Serialize + Send + 'static + std::fmt::Debug,
@@ -55,6 +55,8 @@ where
         error!("Failed to read request length");
         return None;
     }
+
+    trace!("Length bytes: {:?}", len_buf);
     let req_len = u32::from_le_bytes(len_buf) as usize;
 
     let mut buf = vec![0u8; req_len];
@@ -135,11 +137,9 @@ where
         match stream {
             Ok(stream) => {
                 info!("Accepted connection");
-                let (req, tx) = handle(stream).ok_or(std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    "Handshake error",
-                ))?;
-                (handler.clone())(req, tx);
+                if let Some((req, tx)) = process(stream) {
+                    (handler.clone())(req, tx);
+                }
             }
             Err(e) => {
                 error!("Failed to accept connection: {}", e);
@@ -167,11 +167,7 @@ where
         let listener = tokio::net::UnixListener::bind(&socket_path)?;
         info!("Server started on {:?}", socket_path);
 
-        Ok(Self {
-            unix_stream: listener,
-            _req: PhantomData,
-            _res: PhantomData,
-        })
+        Ok(Self { unix_stream: listener, _req: PhantomData, _res: PhantomData })
     }
 }
 
@@ -182,24 +178,14 @@ where
 {
     type Item = std::io::Result<(Req, Sender<Res>)>;
 
-    fn poll_next(
-        self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Option<Self::Item>> {
+    fn poll_next(self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<Option<Self::Item>> {
         match self.unix_stream.poll_accept(cx) {
-            std::task::Poll::Ready(v) => std::task::Poll::Ready(
-                v.ok().map(|(stream, _)| match handle(
-                                stream
-                                    .into_std()
-                                    .expect("Failed to construct stdio UnixStream"),
-                            ) {
-                                Some((req, tx)) => Ok((req, tx)),
-                                None => Err(std::io::Error::new(
-                                    std::io::ErrorKind::InvalidData,
-                                    "Handshake error",
-                                )),
-                            }),
-            ),
+            std::task::Poll::Ready(v) => std::task::Poll::Ready(v.ok().map(|(stream, _)| {
+                match process(stream.into_std().expect("Failed to construct stdio UnixStream")) {
+                    Some((req, tx)) => Ok((req, tx)),
+                    None => Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "Handshake error")),
+                }
+            })),
             std::task::Poll::Pending => std::task::Poll::Pending,
         }
     }
@@ -207,9 +193,7 @@ where
 
 /// Spawns a server that delivers requests as a stream.
 /// Good for use in select!{} or alike.
-pub async fn start_stream<Req, Res, F>(
-    socket_name: impl ToString,
-) -> std::io::Result<RequestStream<Req, Res>>
+pub async fn start_stream<Req, Res, F>(socket_name: impl ToString) -> std::io::Result<RequestStream<Req, Res>>
 where
     Req: for<'de> Deserialize<'de> + Send + 'static + std::fmt::Debug,
     Res: Serialize + Send + 'static + std::fmt::Debug,
@@ -217,11 +201,7 @@ where
     RequestStream::new(socket_name).await
 }
 
-pub fn send_command<App, Req, Res, H>(
-    app: App,
-    command: &Req,
-    handler: Option<H>,
-) -> std::io::Result<()>
+pub fn send_command<App, Req, Res, H>(app: App, command: &Req, handler: Option<H>) -> std::io::Result<()>
 where
     App: ToString,
     Req: Serialize,
